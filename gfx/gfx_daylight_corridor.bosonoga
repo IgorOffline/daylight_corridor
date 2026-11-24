@@ -1,0 +1,205 @@
+// gfx_daylight_corridor.bosonoga
+//
+// A corridor of pillars in daylight. The sky and the sun are 2D, drawn
+// before the camera block, so the 3D covers them. The floor, the pillars
+// and the cube at the end are 3D. The map is 2D again, drawn after the
+// block, so it is in front of everything.
+//
+// W and S walk, A and D turn, Escape quits.
+
+// The walk and the turn of one key, and how fast the camera eases there:
+// each second it closes all but e^-6 of the way.
+const walk_step is 2d0_f32
+const turn_step is 0d2617994_f32
+const ease_rate is 6d0_f32
+const eye_height is 1d7_f32
+const field_of_view is 60d0_f32
+// The corridor along z: a pair of pillars every 4 units, and room to walk
+// between them.
+const pillar_x is 3d0_f32
+const left_pillar_x is -3d0_f32
+const first_pillar_z is 12d0_f32
+const last_pillar_z is -12d0_f32
+const pillar_spacing is 4d0_f32
+const walk_x_min is -2d0_f32
+const walk_x_max is 2d0_f32
+const walk_z_min is -13d0_f32
+const walk_z_max is 16d0_f32
+const cube_z is -17d0_f32
+// The sun stands 20 degrees to the left of the corridor and 17 above the
+// horizon. focal is the screen distance in pixels at which a field of view
+// of 60 degrees spans the 540 pixels of the window: 270 / tan 30.
+const sun_azimuth is 0d35_f32
+const sun_elevation is 0d3_f32
+const focal is 467d654_f32
+const screen_center_x is 480d0_f32
+const screen_center_y is 270d0_f32
+// The map: 4 pixels per unit, z = -20 at its top.
+const map_left is 16d0_f32
+const map_top is 16d0_f32
+const map_width is 120d0_f32
+const map_height is 176d0_f32
+const map_scale is 4d0_f32
+const map_center_x is 76d0_f32
+const map_origin_y is 104d0_f32
+
+bosonoga_global
+di
+  var closing is false_bool
+  var goal_x is 0d0_f32
+  var goal_z is 16d0_f32
+  var goal_heading is 0d0_f32
+  var camera_x is 0d0_f32
+  var camera_z is 16d0_f32
+  var camera_heading is 0d0_f32
+  var seconds is 0d0_f32
+do
+
+// A heading of 0 looks along -z, and a larger heading turns left.
+gfx_key_down
+di
+  if gfx_key eq key_escape
+  di
+    set closing to true_bool
+  do
+  else if gfx_key eq key_left
+  di
+    set goal_heading to_add turn_step
+  do
+  else if gfx_key eq key_right
+  di
+    set goal_heading to_subtract turn_step
+  do
+  else if gfx_key eq key_forward or gfx_key eq key_back
+  di
+    var distance is walk_step
+    if gfx_key eq key_back
+    di
+      set distance to_multiply -1d0_f32
+    do
+    var step_x is math_to_sin goal_heading
+    set step_x to_multiply distance
+    var step_z is math_to_cos goal_heading
+    set step_z to_multiply distance
+    set goal_x to_subtract step_x
+    set goal_z to_subtract step_z
+    set goal_x math_to_max goal_x walk_x_min
+    set goal_x math_to_min goal_x walk_x_max
+    set goal_z math_to_max goal_z walk_z_min
+    set goal_z math_to_min goal_z walk_z_max
+  do
+do
+
+gfx_frame
+di
+  set seconds to_add gfx_delta_time
+  var blend is gfx_delta_time
+  set blend to_multiply ease_rate
+  set blend math_to_min blend 1d0_f32
+  var gap is goal_x
+  set gap to_subtract camera_x
+  set gap to_multiply blend
+  set camera_x to_add gap
+  set gap to goal_z
+  set gap to_subtract camera_z
+  set gap to_multiply blend
+  set camera_z to_add gap
+  set gap to goal_heading
+  set gap to_subtract camera_heading
+  set gap to_multiply blend
+  set camera_heading to_add gap
+  var look_x is math_to_sin camera_heading
+  var look_z is math_to_cos camera_heading
+  var target_x is camera_x
+  set target_x to_subtract look_x
+  var target_z is camera_z
+  set target_z to_subtract look_z
+
+  // The sun, where the level camera sees a direction that far away.
+  gfx_clear color_background
+  var sun_angle is sun_azimuth
+  set sun_angle to_subtract camera_heading
+  val sun_cos is math_to_cos sun_angle
+  if sun_cos gt 0d2_f32
+  di
+    var sun_x is math_to_tan sun_angle
+    set sun_x to_multiply focal
+    set sun_x to_subtract screen_center_x
+    set sun_x to_multiply -1d0_f32
+    var sun_y is math_to_tan sun_elevation
+    set sun_y to_multiply focal
+    set sun_y to_divide sun_cos
+    set sun_y to_subtract screen_center_y
+    set sun_y to_multiply -1d0_f32
+    gfx_draw_circle sun_x sun_y 64d0_f32 color_sun_halo
+    gfx_draw_circle sun_x sun_y 40d0_f32 color_sun
+  do
+
+  gfx_camera_3d camera_x eye_height camera_z target_x eye_height target_z 0d0_f32 1d0_f32 0d0_f32 field_of_view
+  di
+    gfx_draw_cube 0d0_f32 -0d1_f32 0d0_f32 160d0_f32 0d1_f32 160d0_f32 color_floor
+    gfx_draw_grid 40_u32 1d0_f32 color_grid_axes color_grid
+    var pillar_z is first_pillar_z
+    while pillar_z ge last_pillar_z
+    di
+      gfx_draw_cube left_pillar_x 2d0_f32 pillar_z 0d8_f32 4d0_f32 0d8_f32 color_pillar
+      gfx_draw_cube pillar_x 2d0_f32 pillar_z 0d8_f32 4d0_f32 0d8_f32 color_pillar
+      gfx_draw_cube 0d0_f32 4d2_f32 pillar_z 6d8_f32 0d4_f32 0d8_f32 color_beam
+      set pillar_z to_subtract pillar_spacing
+    do
+    // The cube floats, a quarter unit up and down every four seconds.
+    var bob is seconds
+    set bob to_multiply 1d5707963_f32
+    set bob math_to_sin bob
+    set bob to_multiply 0d25_f32
+    set bob to_add 1d5_f32
+    gfx_draw_cube 0d0_f32 bob cube_z 2d0_f32 2d0_f32 2d0_f32 color_cube
+    gfx_draw_cube_wires 0d0_f32 bob cube_z 2d02_f32 2d02_f32 2d02_f32 color_outline
+  do
+
+  gfx_draw_rectangle map_left map_top map_width map_height color_map
+  var map_pillar_z is first_pillar_z
+  while map_pillar_z ge last_pillar_z
+  di
+    var dot_y is map_pillar_z
+    set dot_y to_multiply map_scale
+    set dot_y to_add map_origin_y
+    var dot_x is pillar_x
+    set dot_x to_multiply map_scale
+    var right_dot_x is map_center_x
+    set right_dot_x to_add dot_x
+    var left_dot_x is map_center_x
+    set left_dot_x to_subtract dot_x
+    gfx_draw_circle left_dot_x dot_y 2d0_f32 color_map_pillar
+    gfx_draw_circle right_dot_x dot_y 2d0_f32 color_map_pillar
+    set map_pillar_z to_subtract pillar_spacing
+  do
+  var cube_y is cube_z
+  set cube_y to_multiply map_scale
+  set cube_y to_add map_origin_y
+  set cube_y to_subtract 4d0_f32
+  gfx_draw_rectangle 72d0_f32 cube_y 8d0_f32 8d0_f32 color_cube
+  var you_x is camera_x
+  set you_x to_multiply map_scale
+  set you_x to_add map_center_x
+  var you_y is camera_z
+  set you_y to_multiply map_scale
+  set you_y to_add map_origin_y
+  var facing_x is look_x
+  set facing_x to_multiply -8d0_f32
+  set facing_x to_add you_x
+  var facing_y is look_z
+  set facing_y to_multiply -8d0_f32
+  set facing_y to_add you_y
+  gfx_draw_circle you_x you_y 4d0_f32 color_map_you
+  gfx_draw_circle facing_x facing_y 2d0_f32 color_map_you
+do
+
+gfx_main
+di
+  while not closing
+  di
+    gfx_await_next_frame
+  do
+  return exit_success
+do
