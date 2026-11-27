@@ -1,0 +1,561 @@
+// gfx_bosonoga_multiplier.bosonoga
+//
+// A first-person walk through an urban forest: 8 by 7 trees on a paved
+// square, with city blocks all around it, under a pale sky. Each tree is
+// a canopy, a cube 2 units wide, on a trunk in a patch of grass. The
+// canopies are above the eye, so the player walks under them. The trunks
+// are solid: the player slides along their faces and never leaves the
+// paving. Walking stays at eye height, whatever the pitch of the view.
+//
+// W, S, A and D walk while held. M captures the mouse, which then looks
+// around, and M again releases it, as does the window losing focus. Escape
+// quits.
+
+// The trees stand 6 units apart, in 8 columns along x and 7 rows along z,
+// centered on the origin: the first column is at -21 and the first row at
+// -18. The streets between the canopies are 4 units wide.
+const tree_columns is 8_i32
+const tree_rows is 7_i32
+const tree_spacing is 6d0_f32
+const tree_first_x is -21d0_f32
+const tree_first_z is -18d0_f32
+const canopy_width is 2d0_f32
+const canopy_outline_width is 2d002_f32
+// The canopies start half a unit above the eye, which is at 1.7.
+const trunk_width is 0d5_f32
+const trunk_height is 2d2_f32
+const trunk_center_y is 1d1_f32
+const grass_width is 3d6_f32
+const grass_center_y is 0d01_f32
+const grass_thickness is 0d02_f32
+// The paving reaches 5 units past the outer canopies on every side: it is
+// 52 units along x and 46 along z, with its top at 0.
+const ground_center_y is -0d06_f32
+const ground_width is 52d0_f32
+const ground_depth is 46d0_f32
+const ground_thickness is 0d12_f32
+// The city blocks are 6 units square and stand on the edge of the paving:
+// 8 to the north and 8 to the south, along x from -28 every 8 units, and
+// 6 to the east and 6 to the west, along z from -20.
+const block_width is 6d0_f32
+const block_outline_width is 6d01_f32
+const blocks_along_x is 8_i32
+const blocks_along_z is 6_i32
+const block_spacing is 8d0_f32
+const block_first_x is -28d0_f32
+const block_first_z is -20d0_f32
+const block_north_z is -26d0_f32
+const block_south_z is 26d0_f32
+const block_west_x is -29d0_f32
+const block_east_x is 29d0_f32
+// The camera is upright: its up is the y axis.
+const camera_up_x is 0d0_f32
+const camera_up_y is 1d0_f32
+const camera_up_z is 0d0_f32
+// The player is 0.4 units wide. Its center stays half of that inside the
+// edge of the paving, and half of that outside the faces of a trunk, which
+// are 0.25 from its center.
+const walk_limit_x is 25d8_f32
+const walk_limit_z is 22d8_f32
+const solid_limit is 0d45_f32
+// A frame of more than 0.05 seconds, as after a stall, walks only as far as
+// one of 0.05 seconds.
+const longest_frame is 0d05_f32
+// Radians a pixel of the mouse turns or tilts the view, at sensitivity
+// 1d0_f32 in the group mouse of regina.ini, which multiplies the pixels.
+const radians_per_pixel is 0d0025_f32
+const pitch_limit is 1d5_f32
+const negative_pitch_limit is -1d5_f32
+const tau is 6d2831853_f32
+// Walking diagonally is as fast as walking straight: 1 / sqrt 2.
+const diagonal is 0d70710678_f32
+// The label of the keys at the bottom left of the 1152 by 648 window.
+const label_left is 14d0_f32
+const label_top is 606d0_f32
+const label_width is 492d0_f32
+const label_height is 28d0_f32
+const label_text_x is 24d0_f32
+const label_baseline is 626d0_f32
+const label_size is 20d0_f32
+// Two lines at the top right, with the same padding as the keys label.
+const stats_left is 922d0_f32
+const stats_top is 14d0_f32
+const stats_width is 216d0_f32
+const stats_height is 56d0_f32
+const stats_right is 1128d0_f32
+const fps_baseline is 36d0_f32
+const heap_baseline is 60d0_f32
+// The FPS is of the frames of the last quarter of a second or so, which
+// refreshes as often whatever fps_max in regina.ini is, and the heap is of
+// the last second.
+const fps_seconds_sampled is 0d25_f32
+const heap_seconds_sampled is 1d0_f32
+
+// The degrees of a field of view, above 0 and below 180.
+aka_i32 fov is from 1_i32 to 180_i32
+
+bosonoga_global
+di
+  var closing is false_bool
+  // Only the horizontal position: looking up never moves the player up.
+  // The walk starts at the south edge of the square, on the street just
+  // east of the middle, looking up it.
+  var player_x is 1d5_f32
+  var player_z is 21d5_f32
+  var yaw is -0d3_f32
+  var pitch is -0d1_f32
+  var forward_held is false_bool
+  var back_held is false_bool
+  var left_held is false_bool
+  var right_held is false_bool
+  var fps_frames is 0_i32
+  var fps_seconds is 0d0_f32
+  var fps_shown is nihil_i32
+  var heap_seconds is 0d0_f32
+  var heap_tenths is nihil_u64
+do
+
+// The place along one axis of the tree or block at index_i32, of a line of
+// them from first_f32, spacing_f32 apart.
+def place_fn index_i32 first_f32 spacing_f32 ret 0_f32
+di
+  var place is to_f32 index_i32
+  set place to_multiply spacing_f32
+  set place to_add first_f32
+  return place
+do
+
+// 0, 1 or 2 for the tree or block at a_i32, b_i32, which picks its height
+// or its color: a times a_weight_i32 plus b times b_weight_i32, modulo 9,
+// in thirds. Weights of 7 and 3 scatter heights over the grid, and weights
+// of 3 and 5 scatter colors in a pattern of their own. a and b are never
+// negative, so the modulo is too.
+def pick_fn a_i32 b_i32 a_weight_i32 b_weight_i32 ret 0_i32
+di
+  var pick is a_i32
+  set pick to_multiply a_weight_i32
+  var b_part is b_i32
+  set b_part to_multiply b_weight_i32
+  set pick to_add b_part
+  set pick to_mod 9_i32
+  set pick to_divide 3_i32
+  return pick
+do
+
+// Where the player gets to along one axis, from current_f32 by step_f32,
+// where other_f32 is its place along the other axis, and the paving ends
+// at limit_f32 either way. Along the axis there are along_count_i32 trees
+// from along_first_f32, and along the other other_count_i32 from
+// other_first_f32. The player stops at a face of a trunk when it would
+// cross it, rather than when it would end up inside, so that no step,
+// however long, passes through one.
+def move_axis_fn current_f32 other_f32 step_f32 limit_f32 along_first_f32 along_count_i32 other_first_f32 other_count_i32 ret 0_f32
+di
+  var destination is current_f32
+  set destination to_add step_f32
+  var lowest is limit_f32
+  set lowest to_multiply -1d0_f32
+  set destination math_to_max destination lowest
+  set destination math_to_min destination limit_f32
+  var other_index is 0_i32
+  while other_index lt other_count_i32
+  di
+    var apart is place_fn of other_index other_first_f32 tree_spacing with ret 0_f32
+    set apart to_subtract other_f32
+    set apart math_to_abs apart
+    // Only the line of trees the player is beside can stop it.
+    if apart lt solid_limit
+    di
+      var along_index is 0_i32
+      while along_index lt along_count_i32
+      di
+        val center is place_fn of along_index along_first_f32 tree_spacing with ret 0_f32
+        var high_face is center
+        set high_face to_add solid_limit
+        var low_face is center
+        set low_face to_subtract solid_limit
+        if current_f32 ge high_face and destination lt high_face
+        di
+          set destination to high_face
+        do
+        if current_f32 le low_face and destination gt low_face
+        di
+          set destination to low_face
+        do
+        set along_index to_add 1_i32
+      do
+    do
+    set other_index to_add 1_i32
+  do
+  return destination
+do
+
+// 1 while only plus_bool is held, -1 while only minus_bool is, and 0 while
+// both or neither are.
+def direction_fn plus_bool minus_bool ret 0_f32
+di
+  var direction is 0d0_f32
+  if plus_bool
+  di
+    set direction to_add 1d0_f32
+  do
+  if minus_bool
+  di
+    set direction to_subtract 1d0_f32
+  do
+  return direction
+do
+
+def degrees_fn view_fov ret 0_f32
+di
+  val view is to_i32 view_fov
+  val degrees is to_f32 view
+  return degrees
+do
+
+// The height of a canopy of pick_i32, from pick_fn.
+def canopy_height_fn pick_i32 ret 0_f32
+di
+  var height is to_f32 pick_i32
+  set height to_multiply 0d6_f32
+  set height to_add 1d8_f32
+  return height
+do
+
+// The height of a city block of pick_i32, from pick_fn, and its place
+// along the street, which makes the skyline less regular.
+def block_height_fn pick_i32 index_i32 ret 0_f32
+di
+  var height is to_f32 pick_i32
+  set height to_multiply 5d0_f32
+  var step is index_i32
+  set step to_mod 2_i32
+  val extra is to_f32 step
+  set height to_add extra extra extra 8d0_f32
+  return height
+do
+
+gfx_key_down
+di
+  if gfx_key eq key_escape
+  di
+    set closing to true_bool
+  do
+  else if gfx_key eq key_mouse
+  di
+    if gfx_mouse_captured
+    di
+      gfx_mouse_release
+    do
+    else
+    di
+      gfx_mouse_capture
+    do
+  do
+  else if gfx_key eq key_forward
+  di
+    set forward_held to true_bool
+  do
+  else if gfx_key eq key_back
+  di
+    set back_held to true_bool
+  do
+  else if gfx_key eq key_left
+  di
+    set left_held to true_bool
+  do
+  else if gfx_key eq key_right
+  di
+    set right_held to true_bool
+  do
+do
+
+gfx_key_up
+di
+  if gfx_key eq key_forward
+  di
+    set forward_held to false_bool
+  do
+  else if gfx_key eq key_back
+  di
+    set back_held to false_bool
+  do
+  else if gfx_key eq key_left
+  di
+    set left_held to false_bool
+  do
+  else if gfx_key eq key_right
+  di
+    set right_held to false_bool
+  do
+do
+
+gfx_frame
+di
+  // The FPS is the frames counted over the seconds they took, the whole
+  // gfx_delta_time and not the limit used for walking below. As a sample
+  // lasts at least fps_seconds_sampled, its seconds are never 0.
+  set fps_frames to_add 1_i32
+  set fps_seconds to_add gfx_delta_time
+  if fps_seconds ge fps_seconds_sampled
+  di
+    var fps is to_f32 fps_frames
+    set fps to_divide fps_seconds
+    set fps math_to_round fps
+    val whole_fps is to_i32 fps
+    set fps_shown to_optional_i32 whole_fps
+    set fps_frames to 0_i32
+    set fps_seconds to 0d0_f32
+  do
+  // The heap is read on the first frame, and then once a second. The
+  // seconds past the second carry over, so that the readings keep time.
+  var sample_heap is false_bool
+  if not some heap_tenths
+  di
+    set sample_heap to true_bool
+  do
+  set heap_seconds to_add gfx_delta_time
+  if heap_seconds ge heap_seconds_sampled
+  di
+    set heap_seconds to_mod heap_seconds_sampled
+    set sample_heap to true_bool
+  do
+  // Interpreter-owned heap, rounded to tenths of a MiB. The estimate leaves
+  // out allocator overhead, the graphics library, the GPU and thread stacks.
+  if sample_heap
+  di
+    var tenths is gfx_heap_bytes
+    set tenths to_multiply 10_u64
+    set tenths to_add 524288_u64
+    set tenths to_divide 1048576_u64
+    set heap_tenths to_optional_u64 tenths
+  do
+
+  // The mouse moves 0 pixels unless it is captured, and its pixels come
+  // times the sensitivity. Moving it right turns right, and moving it up
+  // looks up, unless invert_west or invert_north in regina.ini flips them.
+  // The yaw is kept from 0 to tau, so that it keeps its precision however
+  // long the turns.
+  if gfx_mouse_captured
+  di
+    var turn is gfx_mouse_move_x
+    set turn to_multiply radians_per_pixel
+    set yaw to_add turn
+    set yaw to_mod tau
+    if yaw lt 0d0_f32
+    di
+      set yaw to_add tau
+    do
+    var tilt is gfx_mouse_move_y
+    set tilt to_multiply radians_per_pixel
+    set pitch to_subtract tilt
+    set pitch math_to_max pitch negative_pitch_limit
+    set pitch math_to_min pitch pitch_limit
+  do
+
+  // Forward along the yaw is (sin yaw, -cos yaw), and right is (cos yaw,
+  // sin yaw). Each axis moves on its own, x first, so that the player
+  // slides along a face of a trunk.
+  var distance is math_to_min gfx_delta_time longest_frame
+  set distance to_multiply global_walk_speed
+  var forward is direction_fn of forward_held back_held with ret 0_f32
+  var sideways is direction_fn of right_held left_held with ret 0_f32
+  val forward_size is math_to_abs forward
+  val sideways_size is math_to_abs sideways
+  if forward_size gt 0d0_f32 and sideways_size gt 0d0_f32
+  di
+    set distance to_multiply diagonal
+  do
+  set forward to_multiply distance
+  set sideways to_multiply distance
+  val yaw_sin is math_to_sin yaw
+  val yaw_cos is math_to_cos yaw
+  var move_x is yaw_cos
+  set move_x to_multiply sideways
+  var forward_x is yaw_sin
+  set forward_x to_multiply forward
+  set move_x to_add forward_x
+  var move_z is yaw_sin
+  set move_z to_multiply sideways
+  var forward_z is yaw_cos
+  set forward_z to_multiply forward
+  set move_z to_subtract forward_z
+  set player_x to move_axis_fn of player_x player_z move_x walk_limit_x tree_first_x tree_columns tree_first_z tree_rows with ret 0_f32
+  set player_z to move_axis_fn of player_z player_x move_z walk_limit_z tree_first_z tree_rows tree_first_x tree_columns with ret 0_f32
+
+  // The camera looks from the eye, one unit along the view.
+  val pitch_cos is math_to_cos pitch
+  var target_x is yaw_sin
+  set target_x to_multiply pitch_cos
+  set target_x to_add player_x
+  var target_y is math_to_sin pitch
+  set target_y to_add global_eye_height
+  var target_z is yaw_cos
+  set target_z to_multiply pitch_cos
+  set target_z to_multiply -1d0_f32
+  set target_z to_add player_z
+
+  gfx_clear color_background
+  val view_degrees is degrees_fn of global_fov with ret 0_f32
+  // Where the camera is, where it looks, which way is up, and how wide it sees.
+  gfx_camera_3d
+    player_x global_eye_height player_z
+    target_x target_y target_z
+    camera_up_x camera_up_y camera_up_z
+    view_degrees
+  di
+    gfx_draw_cube 0d0_f32 ground_center_y 0d0_f32 ground_width ground_thickness ground_depth color_paving
+
+    // The trees, row by row. Each is a patch of grass, a trunk, and a
+    // canopy that rests on the trunk, in one of three heights and greens.
+    var tree_row is 0_i32
+    while tree_row lt tree_rows
+    di
+      val tree_z is place_fn of tree_row tree_first_z tree_spacing with ret 0_f32
+      var tree_column is 0_i32
+      while tree_column lt tree_columns
+      di
+        val tree_x is place_fn of tree_column tree_first_x tree_spacing with ret 0_f32
+        gfx_draw_cube tree_x grass_center_y tree_z grass_width grass_thickness grass_width color_grass
+        gfx_draw_cube tree_x trunk_center_y tree_z trunk_width trunk_height trunk_width color_trunk
+        val height_pick is pick_fn of tree_column tree_row 7_i32 3_i32 with ret 0_i32
+        val canopy_height is canopy_height_fn of height_pick with ret 0_f32
+        var canopy_y is canopy_height
+        set canopy_y to_multiply 0d5_f32
+        set canopy_y to_add trunk_height
+        var outline_height is canopy_height
+        set outline_height to_add 0d002_f32
+        var leaves is color_leaves_dark
+        val color_pick is pick_fn of tree_column tree_row 3_i32 5_i32 with ret 0_i32
+        if color_pick eq 1_i32
+        di
+          set leaves to color_leaves
+        do
+        else if color_pick eq 2_i32
+        di
+          set leaves to color_leaves_light
+        do
+        gfx_draw_cube tree_x canopy_y tree_z canopy_width canopy_height canopy_width leaves
+        gfx_draw_cube_wires tree_x canopy_y tree_z canopy_outline_width outline_height canopy_outline_width color_leaves_outline
+        set tree_column to_add 1_i32
+      do
+      set tree_row to_add 1_i32
+    do
+
+    // The city blocks to the north and the south, and then to the west and
+    // the east. Opposite blocks are the same height.
+    var block is 0_i32
+    while block lt blocks_along_x
+    di
+      val block_x is place_fn of block block_first_x block_spacing with ret 0_f32
+      val pick is pick_fn of block 1_i32 7_i32 3_i32 with ret 0_i32
+      val height is block_height_fn of pick block with ret 0_f32
+      var block_y is height
+      set block_y to_multiply 0d5_f32
+      var outline_height is height
+      set outline_height to_add 0d01_f32
+      var facade is color_block
+      if pick eq 1_i32
+      di
+        set facade to color_block_brick
+      do
+      else if pick eq 2_i32
+      di
+        set facade to color_block_dark
+      do
+      gfx_draw_cube block_x block_y block_north_z block_width height block_width facade
+      gfx_draw_cube_wires block_x block_y block_north_z block_outline_width outline_height block_outline_width color_block_outline
+      gfx_draw_cube block_x block_y block_south_z block_width height block_width facade
+      gfx_draw_cube_wires block_x block_y block_south_z block_outline_width outline_height block_outline_width color_block_outline
+      set block to_add 1_i32
+    do
+    set block to 0_i32
+    while block lt blocks_along_z
+    di
+      val block_z is place_fn of block block_first_z block_spacing with ret 0_f32
+      val pick is pick_fn of block 2_i32 7_i32 3_i32 with ret 0_i32
+      val height is block_height_fn of pick block with ret 0_f32
+      var block_y is height
+      set block_y to_multiply 0d5_f32
+      var outline_height is height
+      set outline_height to_add 0d01_f32
+      var facade is color_block
+      if pick eq 1_i32
+      di
+        set facade to color_block_brick
+      do
+      else if pick eq 2_i32
+      di
+        set facade to color_block_dark
+      do
+      gfx_draw_cube block_west_x block_y block_z block_width height block_width facade
+      gfx_draw_cube_wires block_west_x block_y block_z block_outline_width outline_height block_outline_width color_block_outline
+      gfx_draw_cube block_east_x block_y block_z block_width height block_width facade
+      gfx_draw_cube_wires block_east_x block_y block_z block_outline_width outline_height block_outline_width color_block_outline
+      set block to_add 1_i32
+    do
+  do
+
+  gfx_draw_rectangle stats_left stats_top stats_width stats_height color_label_back
+  if some fps_shown as fps
+  di
+    gfx_draw_text
+      gfx_align_x_right gfx_align_y_baseline
+      stats_right fps_baseline
+      font_label label_size color_label_text
+      "FPS: "_str fps
+  do
+  else
+  di
+    gfx_draw_text
+      gfx_align_x_right gfx_align_y_baseline
+      stats_right fps_baseline
+      font_label label_size color_label_text
+      "FPS: --"_str
+  do
+  if some heap_tenths as tenths
+  di
+    var whole is tenths
+    set whole to_divide 10_u64
+    var tenth is tenths
+    set tenth to_mod 10_u64
+    gfx_draw_text
+      gfx_align_x_right gfx_align_y_baseline
+      stats_right heap_baseline
+      font_label label_size color_label_text
+      "Heap: ≈"_str whole "."_str tenth " MiB"_str
+  do
+
+  gfx_draw_rectangle label_left label_top label_width label_height color_label_back
+  if gfx_mouse_captured
+  di
+    // The crosshair: lines 10 pixels long, white and 1 pixel wide over dark
+    // and 3 pixels wide, the horizontal one first.
+    gfx_draw_rectangle 571d0_f32 322d5_f32 10d0_f32 3d0_f32 color_crosshair_shadow
+    gfx_draw_rectangle 571d0_f32 323d5_f32 10d0_f32 1d0_f32 color_crosshair
+    gfx_draw_rectangle 574d5_f32 319d0_f32 3d0_f32 10d0_f32 color_crosshair_shadow
+    gfx_draw_rectangle 575d5_f32 319d0_f32 1d0_f32 10d0_f32 color_crosshair
+    gfx_draw_text
+      gfx_align_x_left gfx_align_y_baseline
+      label_text_x label_baseline
+      font_label label_size color_label_text
+      "WASD  Move     M  Release mouse     Esc  Quit"_str
+  do
+  else
+  di
+    gfx_draw_text
+      gfx_align_x_left gfx_align_y_baseline
+      label_text_x label_baseline
+      font_label label_size color_label_text
+      "WASD  Move     M  Lock mouse / look     Esc  Quit"_str
+  do
+do
+
+gfx_main
+di
+  while not closing
+  di
+    gfx_await_next_frame
+  do
+  return exit_success
+do

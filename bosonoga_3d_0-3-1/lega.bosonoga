@@ -1,0 +1,115 @@
+// lega.bosonoga
+//
+// lega word    a whole word, as di
+// lega _word   a suffix, as _i32 of 7_i32
+// lega word_   a prefix, as shift_ of shift_0
+
+// suffixes of types
+lega _i32
+lega _u64
+lega _f32
+lega _str
+lega _bool
+
+// suffix of functions
+lega _fn
+
+// prefixes of regina.ini
+lega color_
+lega font_
+lega global_
+lega key_
+
+// values
+lega exit_success
+lega false_bool
+lega nihil_i32
+lega nihil_u64
+lega true_bool
+
+// sections
+lega bosonoga_global
+lega gfx_frame
+lega gfx_key_down
+lega gfx_key_up
+lega gfx_main
+
+// blocks
+lega di
+lega do
+
+// items
+lega aka_i32
+lega const
+lega def
+lega from
+lega ret
+
+// statements
+lega else
+lega if
+lega is
+lega of
+lega return
+lega set
+lega val
+lega var
+lega while
+lega with
+
+// conditions
+lega and
+lega as
+lega eq
+lega ge
+lega gt
+lega le
+lega lt
+lega not
+lega some
+
+// operations
+lega to
+lega to_add
+lega to_divide
+lega to_mod
+lega to_multiply
+lega to_subtract
+
+// conversions
+lega to_f32
+lega to_i32
+lega to_optional_i32
+lega to_optional_u64
+
+// math
+lega math_to_abs
+lega math_to_cos
+lega math_to_max
+lega math_to_min
+lega math_to_round
+lega math_to_sin
+
+// gfx statements
+lega gfx_await_next_frame
+lega gfx_camera_3d
+lega gfx_clear
+lega gfx_draw_cube
+lega gfx_draw_cube_wires
+lega gfx_draw_rectangle
+lega gfx_draw_text
+lega gfx_mouse_capture
+lega gfx_mouse_release
+
+// gfx values
+lega gfx_delta_time
+lega gfx_heap_bytes
+lega gfx_key
+lega gfx_mouse_captured
+lega gfx_mouse_move_x
+lega gfx_mouse_move_y
+
+// alignments of gfx_draw_text
+lega gfx_align_x_left
+lega gfx_align_x_right
+lega gfx_align_y_baseline
